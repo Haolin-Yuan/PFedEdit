@@ -3,8 +3,9 @@ from collections import defaultdict
 import numpy as np
 import torch.utils.data
 import torchvision.transforms as transforms
-from torchvision.datasets import CIFAR10, MNIST, CelebA
+from torchvision.datasets import CIFAR10, MNIST, CelebA, FashionMNIST,CIFAR100
 from data_loader import Lyme
+from torch.utils.data import random_split
 
 
 # fix random seed
@@ -23,22 +24,30 @@ def get_datasets(data_name, dataroot):
 
     if data_name =='cifar':
         normalization = transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010))
-        transform = transforms.Compose([transforms.ToTensor(), transforms.Resize((224, 224)), normalization])
+        transform = transforms.Compose([transforms.ToTensor(), transforms.Resize((60, 32)), normalization])
         data_obj = CIFAR10
+    elif data_name =='cifar100':
+        normalization = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        transform = transforms.Compose([transforms.ToTensor(), transforms.Resize(224), normalization])
+        data_obj = CIFAR100
     elif data_name == 'mnist':
         normalization = transforms.Normalize((0.1307,), (0.3081,))
         transform = transforms.Compose([transforms.ToTensor(),  normalization])
         data_obj = MNIST
+    elif data_name == 'fmnist':
+        normalization = transforms.Normalize((0.1307,), (0.3081,))
+        transform = transforms.Compose([transforms.ToTensor(),  normalization])
+        data_obj = FashionMNIST
     elif data_name == "lyme":
         normalization = transforms.Normalize(mean=[0.6579, 0.5389, 0.4849], std=[0.2591, 0.2434, 0.2491])
         transform = transforms.Compose([transforms.ToTensor(), transforms.Resize((224, 224)), normalization])
         data_obj = Lyme
     else:
-        raise ValueError("choose data_name from ['mnist', 'cifar']")
+        raise ValueError("choose data_name from ['mnist', 'cifar', 'fmnist']")
 
     train_set = data_obj(
         dataroot,
-        # download=True,
+        download=True,
         train=True,
         transform=transform,
     )
@@ -54,7 +63,7 @@ def get_datasets(data_name, dataroot):
 
     test_set = data_obj(
         dataroot,
-        # download = True,
+        download = True,
         train=False,
         transform=transform,
     )
@@ -63,8 +72,11 @@ def get_datasets(data_name, dataroot):
     # test_index  = list(range(0, len(test_set), 10))
     # train_set = torch.utils.data.Subset(train_set, train_index)
     # test_set = torch.utils.data.Subset(test_set, test_index)
-    if data_name == "lyme": return train_set, val_set, test_set
-    else: return train_set, test_set
+    if data_name != "lyme":
+        train_size = round(len(train_set) * 0.9)
+        train_set, val_set = random_split(train_set, [train_size, len(train_set) - train_size])
+    return train_set, val_set, test_set
+
 
 
 def get_num_classes_samples(dataset):
@@ -91,7 +103,7 @@ def get_num_classes_samples(dataset):
     return num_classes, num_samples, data_labels_list
 
 
-def gen_classes_per_node(dataset, num_users, classes_per_user=2, high_prob=0.5, low_prob=0.5):
+def gen_classes_per_node(dataset, num_users, classes_per_user=2, high_prob=0.6, low_prob=0.4):
     # high_prob=0.6, low_prob=0.4
     """
     creates the data distribution of each client

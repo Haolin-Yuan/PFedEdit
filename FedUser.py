@@ -4,12 +4,15 @@ import numpy as np
 from model_util import *
 from tqdm import tqdm
 import torch.nn as nn
+from ResNet import ResNet_cifar
 import copy
+import math
 
 
 
 class FedUser():
-    def __init__(self, index, device, model, n_classes, train_dataloader, epochs, lr, num_layer):
+    def __init__(self, index, device, model, n_classes, train_dataloader, epochs, lr, num_layer, module_name_list):
+        self.model_name = model
         self.index = index
         self.device = device
         self.model = globals()[model](num_classes = n_classes)
@@ -18,7 +21,7 @@ class FedUser():
         self.lr = lr
         self.optimizer = torch.optim.SGD(self.model.parameters(), lr= self.lr)
         self.loss_fn = torch.nn.CrossEntropyLoss()
-        self.acc_metric = torchmetrics.Accuracy(task='multiclass', num_classes=4).to(device)
+        self.acc_metric = torchmetrics.Accuracy(task='multiclass', num_classes=n_classes).to(device)
         # decide which layer should be the private layer to be edited locally
         self.layer_name = []
         self.hook_list = []
@@ -26,9 +29,8 @@ class FedUser():
         self.clean_hooks = []
         self.previous_iter_model_weight = globals()[model](num_classes = n_classes)
         self.num_layer = num_layer
-        self.top_module_name_list = None
-        # self.local_acc = []
-        # self.global_acc = []
+        self.module_name_list = module_name_list
+
 
 
     def train(self):
@@ -38,9 +40,9 @@ class FedUser():
             losses = []
             for x, y in self.train_dataloader:
                 x, y = x.to(self.device), y.to(self.device)
-                # one_hot_y = torch.nn.functional.one_hot(y, num_classes=10)
                 self.optimizer.zero_grad()
                 logits, pred = self.model(x)
+                pred = torch.argmax(pred, dim= 1)       # for ciafar dataset only
                 loss = self.loss_fn(logits, y)
                 loss.backward()
                 self.optimizer.step()
@@ -64,7 +66,6 @@ class FedUser():
                 testing_sum += len(y)
         self.model.to("cpu")
         return testing_corrects.cpu().detach(), testing_sum
-
 
 
     def forward_hook(self,module_name):
@@ -94,20 +95,28 @@ class FedUser():
     def recover_from_clean_model(self, model, module_name):
         module = self.get_module(module_name)
         setattr(model, module_name, module)
+
         return model
 
 
 
-    def eval_model_with_hook(self, model, test_loader, hook_list, bias, recover, recovered_name=None):
+    def eval_model_with_hook(self, model, test_loader, bias, recover, recovered_name=None):
         model.to(self.device)
         model.eval()
 
+        # if recover:
+        #     for name, _ in self.previous_iter_model_weight.named_modules():
+        #         if recovered_name in name:
+        #             model  = self.recover_from_clean_model(model, name)
+        #     gt_match_list = []
+
         if recover:
-            for name, _ in self.previous_iter_model_weight.named_modules():
+            for name, module in self.previous_iter_model_weight.named_modules():
                 if recovered_name in name:
-                    model = self.recover_from_clean_model(model, name)
+                    setattr(model, name, module.to(self.device))
             gt_match_list = []
 
+        # losses = []
         with torch.no_grad():
             for x, y in test_loader:
                 x, y = x.to(self.device), y.to(self.device)
@@ -117,14 +126,17 @@ class FedUser():
                 #     else:
                 #         module.register_forward_hook(self.forward_hook(name))
                 logits, y_pred = model(x)
+                # loss = self.loss_fn(logits, y)
+                # losses.append(loss.item())
                 bias.append(compute_st_bias(y_pred, y))
-                if recover: gt_match_list.append(True) if torch.argmax(y_pred) == y else gt_match_list.append(False)
-                hook_list.append(self.model_hook)
+                if recover:
+                    for a, b in zip(y_pred, y): gt_match_list.append(True) if torch.argmax(a) == b else gt_match_list.append(False)
+                # hook_list.append(self.model_hook)
                 del y_pred, logits
         model.to("cpu")
         if recover:
-            return hook_list, bias, gt_match_list
-        else: return hook_list, bias
+            return bias, gt_match_list
+        else: return bias
 
     def compare_hooks(self, hook_1, hook_2):
         models_differ = 0
@@ -151,43 +163,46 @@ class FedUser():
         '''
         self.layer_name = []
         total_effect = {}
-        self.clean_hooks, clean_local_bias  = self.eval_model_with_hook(model=self.previous_iter_model_weight,
-                                                            test_loader= data_loader,recover=False,hook_list=self.clean_hooks,
+        clean_local_bias  = self.eval_model_with_hook(model=self.previous_iter_model_weight,
+                                                            test_loader= data_loader,recover=False,
                                                             bias=[])
 
         # _, clean_global_bias = self.eval_model_with_hook(model= self.model ,
         #                                                     test_loader= data_loader,recover=False,hook_list=self.clean_hooks,
         #                                                     bias=[])
 
-        module_name_list = get_sub_ResNet_module_name(self.model)
+        print(self.model_name, len(self.module_name_list), "# replaced layer ",self.num_layer)
+
         for i, _ in self.model.named_modules():
             # if ".mlp.0" in i or ".mlp.3" in i:
-            if i in module_name_list:
-                _, recovered_bias, gt_match_list = self.eval_model_with_hook(model= copy.deepcopy(self.model),
-                                                            test_loader= data_loader, recover=True,
-                                                            hook_list= [],
-                                                            bias=[], recovered_name=i)
+            if i in self.module_name_list:
+
+                #  for improving model utility on all datasets
+                # if "mlp.1" in i or "mlp.2" in i or "mlp.4" in i:
+                #     distance = 9999
+                #     continue
+                # else:
+                #     if i.split(".")[-1] == "self_attention":
+                #         add_on = "in_proj_weight"
+                #     else:
+                #         add_on = "weight"
+                #         weight_1 = self.model.state_dict()[f"{i}.{add_on}"]
+                #         weight_2 = self.previous_iter_model_weight.state_dict()[f"{i}.{add_on}"]
+                #         distance = 1/torch.norm(weight_1 - weight_2)
+
+
+                recovered_bias, gt_match_list = self.eval_model_with_hook(model= copy.deepcopy(self.model),
+                                                    test_loader= data_loader, recover=True,
+                                                    bias=[], recovered_name=i)
+
+
+
                 # original metrics
                 total_effect[i] = [recovered_bias[x] / clean_local_bias[x] - 1 for x in range(len(clean_local_bias))]
+
                 # new metrics
-                # total_effect[i] = [recovered_bias[x] / clean_local_bias[x]
-                #                    + recovered_bias[x] / clean_global_bias[x] - 2 for x in range(len(clean_local_bias))]
-                # total_effect[i] = [val/2 if mask and val <0 else val for val, mask in zip(total_effect[i], gt_match_list)]
-                # total_effect[i] = [x for x in total_effect[i] if x >= 0]    # get rid of negative values
-
-                # new_list = []
-                # for val, mask in zip(total_effect[i], gt_match_list):
-                #     if mask and val <0: # gt probability drop, but does not change label
-                #         print("mask = True, val <0")
-                #         new_list.append(val/2)
-                #     elif not mask and val<0 :
-                #         new_list.append(val*1.5)
-                #         print("mask = False, val <0")
-                #     else:
-                #         new_list.append(val)
-                # total_effect[i] = new_list
-
                 tf_list = {"A": 0, "B":0, "C":0, "D":0, "E":0}
+
                 # A mask, val >0, B mask > 0, val <0; C mask<0 , val >0, D, mask, val<0
                 for val, mask in zip(total_effect[i], gt_match_list):
                     if mask and val >0:
@@ -199,9 +214,8 @@ class FedUser():
                     elif not mask and val < 0:
                         tf_list["E"] += 1
                 tf_list["D"] += sum(total_effect[i])/ len(clean_local_bias)
-
                 total_effect[i] = tf_list
-                # total_effect[i] = sum(total_effect[i])/ len(clean_local_bias)
+
                 del recovered_bias
 
         def custom_sort(data):
@@ -209,21 +223,25 @@ class FedUser():
 
         total_effect = sorted(total_effect.items(), key=custom_sort, reverse=True)
 
+
         print(total_effect)
 
         for i in range(self.num_layer):
+            # if total_effect[i][1]["A"] > 0 or total_effect[i][1]["B"] > 0:
             val, _ = total_effect[i]
             self.layer_name.append(val)
 
 
-        # total_effect = dict(sorted(total_effect.items(), key=lambda x: x[1], reverse = True))
+        # loss, smaller the better
+        # total_effect = dict(sorted(total_effect.items(), key=lambda x: x[1]))
+        # # total_effect = dict(sorted(total_effect.items(), key=lambda x: x[1], reverse=True))
         # print(total_effect)
         # for i in range(self.num_layer):
         #     layer = max(total_effect, key=lambda x: total_effect[x])
         #     self.layer_name.append(layer)
         #     total_effect.pop(layer)
-
-        del total_effect
+        #
+        # del total_effect
 
 
 
@@ -251,3 +269,8 @@ class FedUser():
 
 
 
+if __name__ == "__main__":
+    # model = ResNet_cifar(num_classes=10)
+    model = "ResNet_cifar"
+    model = globals()[model](num_classes = 10)
+    print(model)

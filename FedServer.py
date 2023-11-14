@@ -1,5 +1,6 @@
 import torch
 from model_util import *
+from ResNet import ResNet_cifar
 
 class FedServer():
 
