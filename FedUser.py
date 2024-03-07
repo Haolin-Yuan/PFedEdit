@@ -104,12 +104,6 @@ class FedUser():
         model.to(self.device)
         model.eval()
 
-        # if recover:
-        #     for name, _ in self.previous_iter_model_weight.named_modules():
-        #         if recovered_name in name:
-        #             model  = self.recover_from_clean_model(model, name)
-        #     gt_match_list = []
-
         if recover:
             for name, module in self.previous_iter_model_weight.named_modules():
                 if recovered_name in name:
@@ -162,29 +156,10 @@ class FedUser():
                                                             test_loader= data_loader,recover=False,
                                                             bias=[])
 
-        # _, clean_global_bias = self.eval_model_with_hook(model= self.model ,
-        #                                                     test_loader= data_loader,recover=False,hook_list=self.clean_hooks,
-        #                                                     bias=[])
-
         print(self.model_name, len(self.module_name_list), "# replaced layer ",self.num_layer)
 
         for i, _ in self.model.named_modules():
-            # if ".mlp.0" in i or ".mlp.3" in i:
             if i in self.module_name_list:
-
-                #  for improving model utility on all datasets
-                # if "mlp.1" in i or "mlp.2" in i or "mlp.4" in i:
-                #     distance = 9999
-                #     continue
-                # else:
-                #     if i.split(".")[-1] == "self_attention":
-                #         add_on = "in_proj_weight"
-                #     else:
-                #         add_on = "weight"
-                #         weight_1 = self.model.state_dict()[f"{i}.{add_on}"]
-                #         weight_2 = self.previous_iter_model_weight.state_dict()[f"{i}.{add_on}"]
-                #         distance = 1/torch.norm(weight_1 - weight_2)
-
 
                 recovered_bias, gt_match_list = self.eval_model_with_hook(model= copy.deepcopy(self.model),
                                                     test_loader= data_loader, recover=True,
@@ -222,21 +197,8 @@ class FedUser():
         print(total_effect)
 
         for i in range(self.num_layer):
-            # if total_effect[i][1]["A"] > 0 or total_effect[i][1]["B"] > 0:
             val, _ = total_effect[i]
             self.layer_name.append(val)
-
-
-        # loss, smaller the better
-        # total_effect = dict(sorted(total_effect.items(), key=lambda x: x[1]))
-        # # total_effect = dict(sorted(total_effect.items(), key=lambda x: x[1], reverse=True))
-        # print(total_effect)
-        # for i in range(self.num_layer):
-        #     layer = max(total_effect, key=lambda x: total_effect[x])
-        #     self.layer_name.append(layer)
-        #     total_effect.pop(layer)
-        #
-        # del total_effect
 
 
 
