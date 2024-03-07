@@ -120,11 +120,6 @@ class FedUser():
         with torch.no_grad():
             for x, y in test_loader:
                 x, y = x.to(self.device), y.to(self.device)
-                # for name, module in model.named_modules():
-                #     if recover == True and recovered_name in name:
-                #         module.register_forward_hook(self.recover_hidden_state_value(name, index= len(hook_list)))
-                #     else:
-                #         module.register_forward_hook(self.forward_hook(name))
                 logits, y_pred = model(x)
                 # loss = self.loss_fn(logits, y)
                 # losses.append(loss.item())
