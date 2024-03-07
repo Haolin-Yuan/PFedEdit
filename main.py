@@ -15,7 +15,7 @@ NUM_CLASSES = 100
 MODEL = "ResNet18"
 LOCAL_EPOCHS = 1
 DATA_NAME = "cifar100"
-root = None if DATA_NAME == "lyme" else "/home/haolin/Projects/torch_data"
+root = None 
 BATCH_SIZE = 10
 NUM_CLASS_CLIENT = 20
 SAMPLE_RATE = 1
